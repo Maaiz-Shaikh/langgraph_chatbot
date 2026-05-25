@@ -2,7 +2,7 @@ from langgraph.graph import StateGraph, START, END
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph.message import add_messages
 from typing import TypedDict, Annotated
-from langchain_core.messages import HumanMessage, BaseMessage
+from langchain_core.messages import BaseMessage
 from langgraph.checkpoint.memory import MemorySaver 
 from dotenv import load_dotenv
 import os
