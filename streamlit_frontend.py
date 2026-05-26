@@ -19,9 +19,14 @@ if user_input:
     with st.chat_message("user"):
         st.text(user_input)
 
-    response = chatbot.invoke({'messages': [HumanMessage(content=user_input)]}, config=config)
-    ai_response = response['messages'][-1].content[0]['text']
-    st.session_state["message_history"].append({"role": "assistant", "content": ai_response})
     with st.chat_message("assistant"):
-        st.text(ai_response)
+        ai_response = st.write_stream(
+            chat_message.content[0]["text"] if len(chat_message.content) > 0 else ""
+            for chat_message, metadata in chatbot.stream(
+                {'messages': [HumanMessage(content=user_input)]},
+                config=config,
+                stream_mode='messages',
+            )
+        )
+        st.session_state["message_history"].append({"role": "assistant", "content": ai_response})
 
