@@ -71,13 +71,16 @@ if user_input:
         st.text(user_input)
 
     with st.chat_message("assistant"):
-        ai_response = st.write_stream(
-            chat_message.content[0]["text"] if len(chat_message.content) > 0 else ""
+        def ai_only_stream():
             for chat_message, metadata in chatbot.stream(
                 {'messages': [HumanMessage(content=user_input)]},
                 config=config,
                 stream_mode='messages',
-            )
+            ):
+                if isinstance(chat_message, AIMessage):
+                    yield chat_message.content[0]["text"] if len(chat_message.content) > 0 else ""
+        ai_response = st.write_stream(
+            ai_only_stream()
         )
         st.session_state["message_history"].append({"role": "assistant", "content": ai_response})
 
