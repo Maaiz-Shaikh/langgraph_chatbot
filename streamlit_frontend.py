@@ -75,8 +75,8 @@ if all_conversations:
             for message in messages:
                 if isinstance(message, HumanMessage):
                     temp_messages.append({"role": "user", "content": message.content})
-                elif isinstance(message, AIMessage):
-                    temp_messages.append({"role": "assistant", "content": message.content[0]["text"] if len(message.content) > 0 else ""})
+                elif isinstance(message, AIMessage) and isinstance(message.content, list) and len(message.content) > 0:
+                        temp_messages.append({"role": "assistant", "content": message.content[0]["text"] if len(message.content) > 0 else ""})
             st.session_state["message_history"] = temp_messages
             st.rerun()
 
@@ -111,7 +111,7 @@ if user_input:
                 config=config,
                 stream_mode='messages',
             ):
-                if isinstance(chat_message, AIMessage):
+                if isinstance(chat_message, AIMessage) and metadata.get('langgraph_node') == 'chat_node':
                     content = chat_message.content
                     if isinstance(content, list) and len(content) > 0:
                         text = content[0].get("text", "") if isinstance(content[0], dict) else str(content[0])

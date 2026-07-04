@@ -105,7 +105,7 @@ def retrieve_all_threads():
     
     return list(all_threads)
 
-conn = sqlite3.connect('chatbot.db', check_same_thread=False)
+conn = sqlite3.connect('chatbot_1.db', check_same_thread=False)
 checkpointer = SqliteSaver(conn=conn)
 
 # ***************************** Conversations Database *****************************
@@ -205,7 +205,7 @@ Examples:
             {"role": "user", "content": user_message}
         ])
         
-        title = response.content.strip()
+        title = response.content[0]['text'].strip()
         
         if not title or title == "":
             return "New Resume Chat"
