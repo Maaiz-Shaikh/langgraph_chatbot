@@ -1,3 +1,4 @@
+from langchain_core.messages.utils import trim_messages, count_tokens_approximately
 from langgraph.graph import StateGraph, START, END
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph.message import add_messages
@@ -63,7 +64,20 @@ class ChatState(TypedDict):
 
 
 def chat_node(state: ChatState) -> ChatState:
-    messages = state['messages']
+    # messages = state['messages']
+    messages = trim_messages(
+        state['messages'], 
+        max_tokens=36000, 
+        strategy="last",
+        start_on="human",
+        include_system=True,
+        token_counter=count_tokens_approximately
+        )
+
+    print("token count:", count_tokens_approximately(messages))
+    for msg in messages:
+        print(msg)
+
     response = llm_with_tools.invoke(messages)
     return {'messages': [response]}
 
