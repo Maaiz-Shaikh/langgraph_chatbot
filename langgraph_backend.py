@@ -1,3 +1,4 @@
+from langchain.messages import RemoveMessage
 from langchain_core.messages.utils import trim_messages, count_tokens_approximately
 from langgraph.graph import StateGraph, START, END
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -12,6 +13,7 @@ from dotenv import load_dotenv
 import os
 import sqlite3
 import requests
+from streamlit import cursor
 
 load_dotenv()
 api_key = os.getenv("GEMINI_API_KEY")
@@ -60,26 +62,57 @@ class ChatState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
     conversation_id: str
     title_generated: bool
+    summary: str
 
 
 
 def chat_node(state: ChatState) -> ChatState:
-    # messages = state['messages']
-    messages = trim_messages(
-        state['messages'], 
-        max_tokens=36000, 
-        strategy="last",
-        start_on="human",
-        include_system=True,
-        token_counter=count_tokens_approximately
-        )
+    messages = []
 
-    print("token count:", count_tokens_approximately(messages))
-    for msg in messages:
-        print(msg)
+    if state.get('summary'):
+        messages.append({
+            "role": "system", 
+            "content": f"Conversation summary: {state['summary']}"
+        })
+    messages.extend(state['messages'])
+    print(messages)
+    # messages = trim_messages(
+    #     state['messages'], 
+    #     max_tokens=36000, 
+    #     strategy="last",
+    #     start_on="human",
+    #     include_system=True,
+    #     token_counter=count_tokens_approximately
+    #     )
+
+    # print("token count:", count_tokens_approximately(messages))
+    # for msg in messages:
+    #     print(msg)
 
     response = llm_with_tools.invoke(messages)
     return {'messages': [response]}
+
+def summarize_conversation(state: ChatState) -> ChatState:
+    if not should_summarize(state):
+        return state  # No summarization needed
+
+    existing_summary = state.get('summary', '')
+    if existing_summary:
+        prompt = f"Existing summary: {existing_summary}\n\nExtend the summary using the new conversation above.\n\n"
+    else:
+        prompt = "Create a summary of the conversation above.\n\n"      
+
+    messages_for_summary = state['messages'] + [HumanMessage(content=prompt)]
+    response = llm.invoke(messages_for_summary)
+    messages_to_delete = state['messages'][:-10] # Keep the last 10 messages for context
+
+    return {
+        'summary': response.content[0]['text'].strip(),
+        'messages': [RemoveMessage(id=msg.id) for msg in messages_to_delete]  # Clear messages after summarization
+    }
+
+def should_summarize(state: ChatState):
+    return len(state["messages"]) > 20 # Summarize if there are more than 20 messages
 
 def title_generation_node(state: ChatState) -> ChatState:
     """
@@ -123,6 +156,56 @@ conn = sqlite3.connect('chatbot_1.db', check_same_thread=False)
 checkpointer = SqliteSaver(conn=conn)
 
 # ***************************** Conversations Database *****************************
+def init_messages_db():
+    """Initialize messages table if not exists."""
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS messages (
+            conversation_id TEXT NOT NULL,
+            sequence INTEGER NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+            PRIMARY KEY (conversation_id, sequence)
+        )
+    ''')
+    conn.commit()
+            
+def insert_message(conversation_id, role, content):
+    """Insert a message into the messages table."""
+    cursor = conn.cursor()
+
+    # step 1: find latest sequence number for this conversation
+    cursor.execute("""
+        SELECT MAX(sequence)
+        FROM messages
+        WHERE conversation_id = ?
+    """, (conversation_id,))
+
+    latest_sequence = cursor.fetchone()[0]
+
+    # step 2: calculate the next sequence number
+    sequence = latest_sequence + 1 if latest_sequence is not None else 1
+
+    # step 3: insert the new message with the next sequence number
+    cursor.execute('''
+        INSERT INTO messages (conversation_id, sequence, role, content)
+        VALUES (?, ?, ?, ?)
+    ''', (conversation_id, sequence, role, content))
+    conn.commit()
+
+def get_messages_for_conversation(conversation_id):
+    """Retrieve all messages for a given conversation_id."""
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT role, content
+        FROM messages
+        WHERE conversation_id = ?
+        ORDER BY sequence ASC
+    ''', (conversation_id,))
+    return cursor.fetchall()
+
 def init_conversation_db():
     """Initialize conversations table if not exists."""
     cursor = conn.cursor()
@@ -237,14 +320,20 @@ Examples:
 
 # Initialize database
 init_conversation_db()
+init_messages_db()
 
 graph = StateGraph(ChatState)
 graph.add_node('title_generation', title_generation_node)
 graph.add_node('chat_node', chat_node)
 graph.add_node('tools', tool_node)
+graph.add_node('summarize', summarize_conversation)
 graph.add_edge(START, 'title_generation')
 graph.add_edge('title_generation', 'chat_node')
 graph.add_conditional_edges('chat_node', tools_condition)
 graph.add_edge('tools', 'chat_node')
+graph.add_edge('chat_node', 'summarize')
 
 chatbot = graph.compile(checkpointer=checkpointer)
+# display the graph as a mermaid diagram
+# with open("workflow.png", "wb") as f:
+#     f.write(chatbot.get_graph().draw_mermaid_png())

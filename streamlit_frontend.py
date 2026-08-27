@@ -1,7 +1,7 @@
 import streamlit as st
 from langgraph_backend import (
     chatbot, retrieve_all_threads, create_conversation,
-    get_conversation, get_all_conversations
+    get_conversation, get_all_conversations, insert_message, get_messages_for_conversation
 )
 from langchain_core.messages import HumanMessage, AIMessage
 import uuid
@@ -34,7 +34,8 @@ def add_thread(thread_id):
         st.session_state["chat_threads"].append(thread_id)
 
 def load_conversation(thread_id):
-    return chatbot.get_state(config={"configurable": {"thread_id": thread_id}}).values.get("messages", [])
+    messages = get_messages_for_conversation(thread_id)
+    return messages if messages else []
 
 # ************************************* Session Setup ************************************
 if "message_history" not in st.session_state:
@@ -73,10 +74,11 @@ if all_conversations:
             messages = load_conversation(conv_id)
             temp_messages = []
             for message in messages:
-                if isinstance(message, HumanMessage):
-                    temp_messages.append({"role": "user", "content": message.content})
-                elif isinstance(message, AIMessage) and isinstance(message.content, list) and len(message.content) > 0:
-                        temp_messages.append({"role": "assistant", "content": message.content[0]["text"] if len(message.content) > 0 else ""})
+                role, content = message
+                if role == "user":
+                    temp_messages.append({"role": "user", "content": content})
+                elif role == "assistant":
+                    temp_messages.append({"role": "assistant", "content": content})
             st.session_state["message_history"] = temp_messages
             st.rerun()
 
@@ -96,6 +98,7 @@ for message in st.session_state["message_history"]:
 user_input = st.chat_input("Type here...")
 
 if user_input:
+    insert_message(st.session_state["thread_id"], "user", user_input)
     st.session_state["message_history"].append({"role": "user", "content": user_input})
     with st.chat_message("user"):
         st.text(user_input)
@@ -106,7 +109,8 @@ if user_input:
                 {
                     'messages': [HumanMessage(content=user_input)],
                     'conversation_id': st.session_state["thread_id"],
-                    'title_generated': st.session_state.get("title_generated", False)
+                    'title_generated': st.session_state.get("title_generated", False),
+                    # 'summary': '',
                 },
                 config=config,
                 stream_mode='messages',
@@ -121,7 +125,8 @@ if user_input:
         
         ai_response = st.write_stream(ai_only_stream())
         st.session_state["message_history"].append({"role": "assistant", "content": ai_response})
-        
+        insert_message(st.session_state["thread_id"], "assistant", ai_response)
+
         # Update title_generated flag if first message was just processed
         if not st.session_state.get("title_generated", False):
             st.session_state["title_generated"] = True
