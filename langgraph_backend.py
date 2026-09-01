@@ -12,6 +12,7 @@ from langchain_core.tools import tool
 from dotenv import load_dotenv
 import os
 import sqlite3
+import json
 import requests
 from streamlit import cursor
 
@@ -156,6 +157,83 @@ conn = sqlite3.connect('chatbot_1.db', check_same_thread=False)
 checkpointer = SqliteSaver(conn=conn)
 
 # ***************************** Conversations Database *****************************
+def init_memory_db():
+    """Initialize memory table if not exists."""
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS memory (
+            namespace TEXT NOT NULL,
+            key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+            PRIMARY KEY (namespace, key)
+        )
+    ''')
+    conn.commit()
+
+def _to_json_text(value):
+    """Serialize JSON-like values for SQLite storage, including tuples."""
+    if isinstance(value, tuple):
+        payload = {"__type__": "tuple", "value": list(value)}
+        return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def _from_json_text(value):
+    """Deserialize stored JSON text back into Python objects."""
+    if value is None:
+        return None
+
+    decoded = json.loads(value)
+    if isinstance(decoded, dict) and decoded.get("__type__") == "tuple":
+        return tuple(decoded.get("value", []))
+    return decoded
+
+
+def insert_memory(namespace, key, value):
+    """Insert a memory into the memory table."""
+    cursor = conn.cursor()
+    namespace_json = _to_json_text(namespace)
+    value_json = _to_json_text(value)
+    cursor.execute('''
+        INSERT INTO memory (namespace, key, value)
+        VALUES (?, ?, ?)
+        ON CONFLICT(namespace, key) DO UPDATE SET
+            value = excluded.value,
+            updated_at = CURRENT_TIMESTAMP
+    ''', (namespace_json, key, value_json))
+    conn.commit()
+
+
+def get_memory(namespace, key):
+    """Retrieve a memory from the memory table."""
+    cursor = conn.cursor()
+    namespace_json = _to_json_text(namespace)
+    cursor.execute('''
+        SELECT value
+        FROM memory
+        WHERE namespace = ? AND key = ?
+    ''', (namespace_json, key))
+    result = cursor.fetchone()
+    if not result:
+        return None
+    return _from_json_text(result[0])
+
+
+def get_all_memory(namespace):
+    """Retrieve all memory entries for a given namespace."""
+    cursor = conn.cursor()
+    namespace_json = _to_json_text(namespace)
+    cursor.execute('''
+        SELECT key, value
+        FROM memory
+        WHERE namespace = ?
+    ''', (namespace_json,))
+    rows = cursor.fetchall()
+    return [(key, _from_json_text(value)) for key, value in rows]
+
 def init_messages_db():
     """Initialize messages table if not exists."""
     cursor = conn.cursor()
@@ -321,6 +399,7 @@ Examples:
 # Initialize database
 init_conversation_db()
 init_messages_db()
+init_memory_db()
 
 graph = StateGraph(ChatState)
 graph.add_node('title_generation', title_generation_node)
