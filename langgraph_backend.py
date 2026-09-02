@@ -1,10 +1,14 @@
+import uuid
+from langchain_core.runnables import RunnableConfig
+from pydantic import BaseModel, Field
+from prompts import *
 from langchain.messages import RemoveMessage
 from langchain_core.messages.utils import trim_messages, count_tokens_approximately
 from langgraph.graph import StateGraph, START, END
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph.message import add_messages
-from typing import TypedDict, Annotated
-from langchain_core.messages import BaseMessage, HumanMessage
+from typing import List, TypedDict, Annotated
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langgraph.checkpoint.sqlite import SqliteSaver 
 from langgraph.prebuilt import ToolNode, tools_condition
 from langchain_community.tools import DuckDuckGoSearchRun
@@ -59,6 +63,16 @@ llm = ChatGoogleGenerativeAI(model="gemini-3.1-flash-lite", api_key=api_key)
 llm_with_tools = llm.bind_tools(tools)
 tool_node = ToolNode(tools)
 
+class MemoryItem(BaseModel):
+    text: str = Field(description="Atomic user memory")
+    is_new: bool = Field(description="True if new, false if duplicate")
+
+class MemoryDecision(BaseModel):
+    should_write: bool
+    memories: List[MemoryItem] = Field(default_factory=list)
+
+memory_extractor = llm.with_structured_output(MemoryDecision)
+
 class ChatState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
     conversation_id: str
@@ -66,9 +80,40 @@ class ChatState(TypedDict):
     summary: str
 
 
+def remember_node(state: ChatState, config: RunnableConfig):
+    user_id = config["configurable"]["user_id"]
+    ns = ("user", user_id, "details")
 
-def chat_node(state: ChatState) -> ChatState:
+    # existing memory (all items under namespace)
+    items = get_all_memory(ns)
+    existing = "\n".join(it[1].get("data", "") for it in items) if items else "(empty)"
+
+    # latest user message
+    last_text = state["messages"][-1].content
+
+    decision: MemoryDecision = memory_extractor.invoke(
+        [
+            SystemMessage(content=MEMORY_PROMPT.format(user_details_content=existing)),
+            {"role": "user", "content": last_text},
+        ]
+    )
+
+    if decision.should_write:
+        for mem in decision.memories:
+            if mem.is_new and mem.text.strip():
+                print(f"Storing new memory: {mem.text.strip()}")
+                insert_memory(ns, str(uuid.uuid4()), {"data": mem.text.strip()})
+
+    return {}
+
+def chat_node(state: ChatState, config: RunnableConfig) -> ChatState:
     messages = []
+
+    user_id = config["configurable"]["user_id"]
+    ns = ("user", user_id, "details")
+    long_term_memory_items = get_all_memory(ns)
+    user_details_content = "\n".join(it[1].get("data", "") for it in long_term_memory_items) if long_term_memory_items else "(empty)"
+    system_message = SystemMessage(content=SYSTEM_PROMPT_TEMPLATE.format(user_details_content=user_details_content))
 
     if state.get('summary'):
         messages.append({
@@ -90,7 +135,7 @@ def chat_node(state: ChatState) -> ChatState:
     # for msg in messages:
     #     print(msg)
 
-    response = llm_with_tools.invoke(messages)
+    response = llm_with_tools.invoke([system_message] + messages)
     return {'messages': [response]}
 
 def summarize_conversation(state: ChatState) -> ChatState:
@@ -180,7 +225,6 @@ def _to_json_text(value):
         return json.dumps(payload, ensure_ascii=False, sort_keys=True)
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
-
 def _from_json_text(value):
     """Deserialize stored JSON text back into Python objects."""
     if value is None:
@@ -190,7 +234,6 @@ def _from_json_text(value):
     if isinstance(decoded, dict) and decoded.get("__type__") == "tuple":
         return tuple(decoded.get("value", []))
     return decoded
-
 
 def insert_memory(namespace, key, value):
     """Insert a memory into the memory table."""
@@ -206,7 +249,6 @@ def insert_memory(namespace, key, value):
     ''', (namespace_json, key, value_json))
     conn.commit()
 
-
 def get_memory(namespace, key):
     """Retrieve a memory from the memory table."""
     cursor = conn.cursor()
@@ -220,7 +262,6 @@ def get_memory(namespace, key):
     if not result:
         return None
     return _from_json_text(result[0])
-
 
 def get_all_memory(namespace):
     """Retrieve all memory entries for a given namespace."""
@@ -402,11 +443,13 @@ init_messages_db()
 init_memory_db()
 
 graph = StateGraph(ChatState)
+graph.add_node('remember_node', remember_node)
 graph.add_node('title_generation', title_generation_node)
 graph.add_node('chat_node', chat_node)
 graph.add_node('tools', tool_node)
 graph.add_node('summarize', summarize_conversation)
-graph.add_edge(START, 'title_generation')
+graph.add_edge(START, 'remember_node')
+graph.add_edge('remember_node', 'title_generation')
 graph.add_edge('title_generation', 'chat_node')
 graph.add_conditional_edges('chat_node', tools_condition)
 graph.add_edge('tools', 'chat_node')
@@ -414,5 +457,5 @@ graph.add_edge('chat_node', 'summarize')
 
 chatbot = graph.compile(checkpointer=checkpointer)
 # display the graph as a mermaid diagram
-# with open("workflow.png", "wb") as f:
-#     f.write(chatbot.get_graph().draw_mermaid_png())
+with open("workflow.png", "wb") as f:
+    f.write(chatbot.get_graph().draw_mermaid_png())

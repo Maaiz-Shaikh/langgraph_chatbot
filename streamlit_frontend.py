@@ -84,7 +84,7 @@ if all_conversations:
 
 # ************************************** Main UI *****************************************
 config = {
-    'configurable': {'thread_id': st.session_state["thread_id"]},
+    'configurable': {'thread_id': st.session_state["thread_id"], 'user_id': 'u1'},
     'metadata': {
         'thread_id': st.session_state["thread_id"],
     },
