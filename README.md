@@ -761,7 +761,7 @@ The persistence layer can later be migrated to a production database such as Pos
 # 📁 Project Structure
 
 ```text
-langgraph_chatbot/
+memora-ai/
 │
 ├── langgraph_backend.py
 │   ├── LangGraph workflow
@@ -813,9 +813,9 @@ Make sure you have:
 ## 1. Clone the repository
 
 ```bash
-git clone https://github.com/Maaiz-Shaikh/langgraph_chatbot.git
+git clone https://github.com/Maaiz-Shaikh/memora-ai.git
 
-cd langgraph_chatbot
+cd memora-ai
 ```
 
 
