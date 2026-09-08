@@ -19,7 +19,7 @@ It maintains conversation context, remembers useful information about the user a
 
 </p>
 
----
+
 
 ## 🎥 Demo
 
@@ -37,7 +37,7 @@ Or add a YouTube/demo link:
 [▶️ Watch the Demo](YOUR_VIDEO_URL)
 -->
 
----
+
 
 # ✨ What is Memora?
 
@@ -63,13 +63,11 @@ Context-aware Response
 
 The goal is to build an AI assistant that can **remember, reason, use tools, and maintain context** rather than treating every message as an isolated request.
 
----
+
 
 # 🎯 Why I Built This
 
-Building a chatbot with an LLM API is relatively straightforward.
-
-Building a chatbot that behaves more like a useful assistant introduces several engineering challenges:
+Building a chatbot with an LLM API is relatively straightforward but building a chatbot that behaves more like a useful assistant introduces several engineering challenges:
 
 * How should conversation state be maintained?
 * How can multiple conversations exist independently?
@@ -81,81 +79,131 @@ Building a chatbot that behaves more like a useful assistant introduces several 
 
 Memora was built as a hands-on exploration of these problems using **LangGraph and modern LLM application patterns**.
 
----
+
 
 # 🚀 Key Features
 
-### 💬 Context-Aware Conversations
+## 🧠 Long-Term User Memory
 
-Memora maintains the state of an ongoing conversation, allowing follow-up questions to be understood in context.
-
----
-
-### 🧠 Long-Term Memory
-
-Memora can identify useful information provided by the user and store it as long-term memory.
+Memora can identify information from a user's messages that may be useful in future conversations.
 
 For example:
 
 ```text
 User:
-"I'm currently building an AI chatbot using LangGraph."
+"I am currently working on an MCP server using Python."
 
-              ↓
+             ↓
 
 Memory Extraction
 
-              ↓
+             ↓
 
-Long-Term Memory:
-"User is building an AI chatbot using LangGraph."
+Stored User Memory:
+"User is working on a Python-based MCP server."
 ```
 
-The stored information can be used in future conversations.
+When the user interacts with the memora again, the stored information can be provided to the LLM so that responses can be personalized.
 
----
+The memory extraction process uses structured LLM output to determine:
 
-### 🛠️ Tool Calling
+* Whether a message contains memory-worthy information
+* What information should be stored
+* Whether the information is new or already known
 
-Memora can determine when an external tool is required instead of relying only on the language model.
+Only information explicitly provided by the user is considered for storage; the memory prompt instructs the model not to speculate.
 
-Currently supported:
 
-* 🔎 Web Search
-* 🧮 Calculator
-* 📈 Stock Price
 
----
+## 💬 Stateful Conversations
+
+Memora maintains state for each conversation using a unique conversation/thread ID.
+
+This allows multiple conversations to exist independently:
+
+```text
+Conversation A
+    ├── Message 1
+    ├── Message 2
+    └── Message 3
+
+Conversation B
+    ├── Message 1
+    └── Message 2
+
+Conversation C
+    ├── Message 1
+    ├── Message 2
+    └── Message 3
+```
+
+Each conversation can be reopened from the application's sidebar.
+
+
+
+## 💾 Persistent State
+
+LangGraph's `SqliteSaver` is used as the checkpoint backend.
+
+This allows LangGraph workflow state to be persisted rather than existing only in application memory.
+
+The application also maintains SQLite tables for:
+
+* Conversations
+* Messages
+* Long-term user memory
+
+This gives the application a lightweight persistent storage layer suitable for local development and experimentation.
+
+
+
+## 🛠️ Tool Calling
+
+Memora is not restricted to information contained within the language model.
+
+The LLM can determine when an external tool is required and LangGraph routes execution to the appropriate tool.
+
+Currently available tools include:
 
 ### 🔎 Web Search
 
-Memora can search the web when a question requires external or up-to-date information.
+Uses DuckDuckGo search to retrieve information from the web.
+
+Example:
 
 ```text
-User
- ↓
-LLM
- ↓
-Web Search
- ↓
-Search Results
- ↓
-LLM
- ↓
-Final Response
-```
+User:
+"What are the latest developments in LangGraph?"
 
----
+              ↓
+
+LLM decides web search is required
+
+              ↓
+
+DuckDuckGo Search
+
+              ↓
+
+Search results returned to LLM
+
+              ↓
+
+Final response
+```
 
 ### 🧮 Calculator
 
-Arithmetic operations are delegated to a dedicated calculator tool rather than relying on the LLM to perform calculations.
+Supports basic arithmetic operations:
 
----
+* Addition
+* Subtraction
+* Multiplication
+* Division
 
-### 📈 Stock Information
+### 📈 Stock Price
 
-Memora can retrieve stock information using the Alpha Vantage API.
+Retrieves stock information using the Alpha Vantage API.
 
 Example:
 
@@ -163,75 +211,98 @@ Example:
 User:
 "What is the current price of AAPL?"
 
-        ↓
+              ↓
 
 LLM
-        ↓
+ ↓
 Stock Price Tool
-        ↓
+ ↓
 Alpha Vantage
-        ↓
+ ↓
 LLM
-        ↓
+ ↓
 Response
 ```
 
----
 
-### 💾 Persistent Conversations
 
-Conversations are persisted so users can return to previous conversations instead of losing them when the application restarts.
+## 📝 Automatic Conversation Titles
 
----
+Creating multiple conversations can quickly become difficult to manage if every conversation is simply named something like:
 
-### 📝 Automatic Conversation Titles
+```text
+Chat 8f3a91c2
+Chat 2a91bc71
+Chat 72fa01de
+```
 
-New conversations are automatically given a meaningful title based on the initial user message.
+This application automatically generates a concise title from the first user message.
 
 For example:
 
 ```text
 User:
-"Help me understand LangGraph memory."
+"Help me prepare my resume for a Google
+Software Engineer role."
 
         ↓
 
 Generated title:
 
-"Understanding LangGraph Memory"
+"Google SWE Resume Review"
 ```
 
-This makes it easier to manage multiple conversations from the sidebar.
+The generated title is then displayed in the conversation sidebar.
 
----
+This makes the application easier to navigate as the number of conversations grows.
 
-### 🗜️ Conversation Summarization
 
-Long conversations can continuously increase the amount of context sent to an LLM.
 
-Memora addresses this by automatically summarizing older conversation history once the conversation reaches the configured threshold.
+## 🗜️ Conversation Summarization
+
+Long conversations create a challenge for LLM applications because continuously sending the entire conversation history can increase context size and token usage.
+
+Memora addresses this through **automatic conversation summarization**.
+
+When the conversation exceeds the configured message threshold:
 
 ```text
-Long Conversation
-       ↓
-Generate Summary
-       ↓
-Keep Recent Messages
-       ↓
-Remove Older Messages
-       ↓
-Continue Conversation
+More than 20 messages
+        ↓
+Generate conversation summary
+        ↓
+Keep recent messages
+        ↓
+Remove older messages
+        ↓
+Continue conversation
 ```
 
-The current implementation summarizes conversations after the configured message threshold and retains recent messages to keep the active context manageable.
+The current implementation keeps the latest **10 messages** while storing a summary of the earlier conversation.
 
----
+This allows memora to retain the important context of a long conversation without continually carrying the entire raw history forward.
 
-### ⚡ Streaming Responses
 
-Assistant responses are streamed to the Streamlit interface as they are generated, providing a more responsive conversational experience.
 
----
+## ⚡ Streaming Responses
+
+The frontend streams assistant responses from the LangGraph execution rather than waiting for the entire response to finish.
+
+Conceptually:
+
+```text
+LLM generates response
+        ↓
+Response chunks
+        ↓
+Streamlit
+        ↓
+User sees response progressively
+```
+
+This improves the perceived responsiveness of the application.
+
+
 
 # 🏗️ System Architecture
 
@@ -305,7 +376,7 @@ At a high level, Memora consists of:
                            └────────────┘
 ```
 
----
+
 
 # 🔄 LangGraph Workflow
 
@@ -337,7 +408,7 @@ flowchart TD
 ### Workflow Components
 
 | Node                    | Responsibility                                                       |
-| ----------------------- | -------------------------------------------------------------------- |
+| -- | -- |
 | 🧠 **Remember Node**    | Identifies useful information that may be stored as long-term memory |
 | 📝 **Title Generation** | Generates a concise title for a new conversation                     |
 | 💬 **Chat Node**        | Interacts with the Gemini LLM using conversation and memory context  |
@@ -345,7 +416,7 @@ flowchart TD
 | 🗜️ **Summarization**   | Compresses older conversation history                                |
 | 💾 **Checkpoint**       | Persists LangGraph execution state                                   |
 
----
+
 
 # 🧠 Memory Architecture
 
@@ -426,7 +497,7 @@ LLM receives user context
 Personalized response
 ```
 
----
+
 
 # 💾 Persistence Architecture
 
@@ -470,7 +541,7 @@ updated_at
 
 This provides a simple foundation for organizing user-specific memories.
 
----
+
 
 # 🛠️ Tool Calling Architecture
 
@@ -503,7 +574,7 @@ The important design principle is:
 
 > **The application does not execute every tool for every request. The LLM determines when an external capability is required.**
 
----
+
 
 # 🗜️ Context Management
 
@@ -538,7 +609,7 @@ Memora therefore uses conversation summarization.
 
 This pattern helps control context growth while retaining important conversational information.
 
----
+
 
 # 🔄 End-to-End Request Flow
 
@@ -578,7 +649,7 @@ the system follows this general flow:
 14. Response is streamed to the user
 ```
 
----
+
 
 # 💡 Key Engineering Decisions
 
@@ -619,7 +690,7 @@ This enables:
 * Checkpoint persistence
 * Modular workflow design
 
----
+
 
 ## Why Separate Long-Term Memory from Conversation History?
 
@@ -632,7 +703,7 @@ Keeping them separate makes it possible to:
 * Avoid treating every chat message as permanent memory
 * Evolve the memory system independently from conversation storage
 
----
+
 
 ## Why Structured Memory Extraction?
 
@@ -653,7 +724,7 @@ MemoryDecision
 
 This provides a more controlled approach to long-term memory.
 
----
+
 
 ## Why SQLite?
 
@@ -668,12 +739,12 @@ For a local development and portfolio application, it provides a simple way to p
 
 The persistence layer can later be migrated to a production database such as PostgreSQL.
 
----
+
 
 # 🛠️ Technology Stack
 
 | Technology        | Purpose                                      |
-| ----------------- | -------------------------------------------- |
+| -- | -- |
 | **Python**        | Core application and workflow implementation |
 | **LangGraph**     | Stateful AI workflow orchestration           |
 | **LangChain**     | LLM and tool integration                     |
@@ -685,7 +756,7 @@ The persistence layer can later be migrated to a production database such as Pos
 | **Pydantic**      | Structured data validation                   |
 | **python-dotenv** | Environment configuration                    |
 
----
+
 
 # 📁 Project Structure
 
@@ -724,7 +795,7 @@ langgraph_chatbot/
 └── README.md
 ```
 
----
+
 
 # ⚙️ Getting Started
 
@@ -737,7 +808,7 @@ Make sure you have:
 * An Alpha Vantage API key for stock functionality
 * Internet access for web search and external APIs
 
----
+
 
 ## 1. Clone the repository
 
@@ -747,7 +818,7 @@ git clone https://github.com/Maaiz-Shaikh/langgraph_chatbot.git
 cd langgraph_chatbot
 ```
 
----
+
 
 ## 2. Create a virtual environment
 
@@ -767,7 +838,7 @@ python -m venv venv
 venv\Scripts\activate
 ```
 
----
+
 
 ## 3. Install dependencies
 
@@ -775,7 +846,7 @@ venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
----
+
 
 ## 4. Configure environment variables
 
@@ -788,7 +859,7 @@ ALPHA_VANTAGE_API_KEY=your_alpha_vantage_api_key
 
 > ⚠️ Never commit your `.env` file or API keys to GitHub.
 
----
+
 
 ## 5. Run Memora
 
@@ -798,7 +869,7 @@ streamlit run streamlit_frontend.py
 
 Streamlit will provide a local URL where you can access the application.
 
----
+
 
 # 🧪 Testing
 
@@ -819,7 +890,7 @@ As the project evolves, additional tests can be added for:
 * Summarization
 * Title generation
 
----
+
 
 # 🔐 Security Considerations
 
@@ -839,7 +910,7 @@ For a production deployment, additional security measures would be required, inc
 
 The current project should therefore be considered a **portfolio/learning project with production-oriented architecture**, rather than a production-ready SaaS application.
 
----
+
 
 # 📊 Engineering Highlights
 
@@ -859,7 +930,7 @@ This project demonstrates practical experience with several modern AI applicatio
 * **External API integration**
 * **LLM-powered UX features**
 
----
+
 
 # 🔮 Roadmap
 
@@ -881,7 +952,7 @@ Potential future improvements include:
 * [ ] Memory management interface
 * [ ] Expanded unit and integration testing
 
----
+
 
 # 📌 Project Status
 
@@ -891,7 +962,7 @@ The core conversational workflow, persistent conversations, long-term memory, to
 
 The architecture is designed to evolve as additional AI capabilities and production infrastructure are explored.
 
----
+
 
 # 📄 License
 
@@ -899,7 +970,7 @@ This project is licensed under the **MIT License**.
 
 See the [LICENSE](LICENSE) file for details.
 
----
+
 
 # 👨‍💻 Author
 
@@ -910,7 +981,7 @@ Software Engineer focused on **Generative AI, AI/ML Engineering, Agentic AI, RAG
 * GitHub: [@Maaiz-Shaikh](https://github.com/Maaiz-Shaikh)
 * LinkedIn: [Maaiz Shaikh](https://www.linkedin.com/)
 
----
+
 
 <p align="center">
 
